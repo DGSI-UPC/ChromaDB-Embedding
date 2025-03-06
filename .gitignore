@@ -171,3 +171,5 @@ cython_debug/
 .pypirc
 
 chroma_db/
+
+markdown_output/
