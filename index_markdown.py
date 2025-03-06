@@ -1,6 +1,7 @@
 import os
 import chromadb
 from chromadb.config import Settings
+from chromadb.utils import embedding_functions
 from markdown import markdown
 import frontmatter
 from tqdm import tqdm
@@ -8,21 +9,78 @@ from typing import List, Dict, Tuple
 import argparse
 from bs4 import BeautifulSoup
 import re
+from dotenv import load_dotenv
+from openai import OpenAI
 
 class MarkdownIndexer:
-    def __init__(self, persist_dir: str = "chroma_db", chunk_size: int = 500, chunk_overlap: int = 50):
+    def __init__(self, persist_dir: str = "chroma_db", chunk_size: int = 500, chunk_overlap: int = 50, use_openai: bool = False):
         """Initialize the ChromaDB client with persistence.
         
         Args:
             persist_dir (str): Directory to store ChromaDB files
             chunk_size (int): Maximum number of characters per chunk
             chunk_overlap (int): Number of characters to overlap between chunks
+            use_openai (bool): Whether to use OpenAI embeddings (requires API key)
         """
+        # Set up embedding function
+        if use_openai:
+            # Load environment variables
+            load_dotenv()
+            
+            # Initialize OpenAI client
+            openai_api_key = os.getenv('OPENAI_API_KEY')
+            if not openai_api_key:
+                print("Warning: OpenAI API key not found. Falling back to default embeddings.")
+                embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction()
+                print("Using default SentenceTransformer embeddings.")
+            else:
+                # Create OpenAI embedding function
+                embedding_func = embedding_functions.OpenAIEmbeddingFunction(
+                    api_key=openai_api_key,
+                    model_name="text-embedding-3-small"
+                )
+                print("Using OpenAI text-embedding-3-small model for embeddings.")
+        else:
+            # Use default sentence transformer embeddings
+            embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction()
+            print("Using default SentenceTransformer embeddings.")
         self.client = chromadb.PersistentClient(path=persist_dir)
-        self.collection = self.client.get_or_create_collection(
-            name="markdown_docs",
-            metadata={"hnsw:space": "cosine"}
-        )
+        
+        # Try to get existing collection
+        collection_name = "markdown_docs"
+        try:
+            existing_collection = self.client.get_collection(name=collection_name)
+            # If collection exists, try adding a document to check dimensions
+            try:
+                existing_collection.add(
+                    documents=["test"],
+                    metadatas=[{"test": "test"}],
+                    ids=["test"],
+                )
+                # If successful, delete test document
+                existing_collection.delete(ids=["test"])
+                self.collection = existing_collection
+                print(f"Using existing collection '{collection_name}'")
+            except Exception as e:
+                # If dimensions don't match, delete and recreate collection
+                if "dimension" in str(e).lower():
+                    print(f"Recreating collection '{collection_name}' due to embedding dimension change")
+                    self.client.delete_collection(name=collection_name)
+                    self.collection = self.client.create_collection(
+                        name=collection_name,
+                        metadata={"hnsw:space": "cosine"},
+                        embedding_function=embedding_func
+                    )
+                else:
+                    raise e
+        except Exception as e:
+            # Collection doesn't exist, create it
+            self.collection = self.client.create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"},
+                embedding_function=embedding_func
+            )
+            print(f"Created new collection '{collection_name}'")
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
@@ -168,13 +226,15 @@ def main():
     parser.add_argument('--db-path', default='chroma_db', help='ChromaDB persistence directory')
     parser.add_argument('--chunk-size', type=int, default=500, help='Maximum number of characters per chunk')
     parser.add_argument('--chunk-overlap', type=int, default=50, help='Number of characters to overlap between chunks')
+    parser.add_argument('--use-openai', action='store_true', help='Use OpenAI embeddings (requires API key)')
     
     args = parser.parse_args()
     
     indexer = MarkdownIndexer(
         persist_dir=args.db_path,
         chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap
+        chunk_overlap=args.chunk_overlap,
+        use_openai=args.use_openai
     )
     indexer.index_directory(args.directory)
 
