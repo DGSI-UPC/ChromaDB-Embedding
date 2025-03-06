@@ -1,9 +1,12 @@
 # Markdown to ChromaDB Indexer
 
-This tool indexes markdown files into ChromaDB for efficient semantic search capabilities, with intelligent text chunking for better search results.
+This tool indexes markdown files into ChromaDB for efficient semantic search capabilities, with support for both default embeddings and OpenAI's text-embedding-3-small model for enhanced search quality.
 
 ## Features
 
+- Flexible embedding options:
+  - Default ChromaDB embeddings (no API key required)
+  - Optional OpenAI text-embedding-3-small model for enhanced quality
 - Recursively processes markdown files in a directory
 - Intelligent text chunking with configurable size and overlap
 - Sentence-aware splitting to maintain context
@@ -20,6 +23,12 @@ This tool indexes markdown files into ChromaDB for efficient semantic search cap
 pip install -r requirements.txt
 ```
 
+2. (Optional) Set up OpenAI embeddings:
+   - Create a `.env` file with your OpenAI API key:
+```bash
+OPENAI_API_KEY=your_api_key_here
+```
+
 ## Usage
 
 To index your markdown files:
@@ -32,12 +41,17 @@ Optional arguments:
 - `--db-path`: Specify a custom path for ChromaDB persistence (default: "chroma_db")
 - `--chunk-size`: Maximum number of characters per chunk (default: 500)
 - `--chunk-overlap`: Number of characters to overlap between chunks (default: 50)
+- `--use-openai`: Use OpenAI embeddings instead of default embeddings (requires API key)
 
 ### Examples
 
-Index with custom chunk size and overlap:
+Index with custom settings:
 ```bash
+# Using default embeddings
 python index_markdown.py /path/to/markdown --chunk-size 1000 --chunk-overlap 100
+
+# Using OpenAI embeddings (requires API key)
+python index_markdown.py /path/to/markdown --use-openai
 ```
 
 ## Python API Usage
@@ -49,7 +63,8 @@ from index_markdown import MarkdownIndexer
 indexer = MarkdownIndexer(
     persist_dir="chroma_db",
     chunk_size=500,  # characters per chunk
-    chunk_overlap=50  # overlap between chunks
+    chunk_overlap=50,  # overlap between chunks
+    use_openai=True  # set to True to use OpenAI embeddings
 )
 
 # Index a directory of markdown files
