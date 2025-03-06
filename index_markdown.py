@@ -221,22 +221,61 @@ class MarkdownIndexer:
         return results
 
 def main():
-    parser = argparse.ArgumentParser(description='Index markdown files into ChromaDB')
-    parser.add_argument('directory', help='Directory containing markdown files')
-    parser.add_argument('--db-path', default='chroma_db', help='ChromaDB persistence directory')
-    parser.add_argument('--chunk-size', type=int, default=500, help='Maximum number of characters per chunk')
-    parser.add_argument('--chunk-overlap', type=int, default=50, help='Number of characters to overlap between chunks')
-    parser.add_argument('--use-openai', action='store_true', help='Use OpenAI embeddings (requires API key)')
+    parser = argparse.ArgumentParser(description='Index and query markdown files using ChromaDB')
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # Index command
+    index_parser = subparsers.add_parser('index', help='Index markdown files')
+    index_parser.add_argument('directory', help='Directory containing markdown files')
+    index_parser.add_argument('--db-path', default='chroma_db', help='ChromaDB persistence directory')
+    index_parser.add_argument('--chunk-size', type=int, default=500, help='Maximum number of characters per chunk')
+    index_parser.add_argument('--chunk-overlap', type=int, default=50, help='Number of characters to overlap between chunks')
+    index_parser.add_argument('--use-openai', action='store_true', help='Use OpenAI embeddings (requires API key)')
+    
+    # Query command
+    query_parser = subparsers.add_parser('query', help='Search indexed documents')
+    query_parser.add_argument('query', help='Search query')
+    query_parser.add_argument('--db-path', default='chroma_db', help='ChromaDB persistence directory')
+    query_parser.add_argument('--n-results', type=int, default=5, help='Number of results to return')
+    query_parser.add_argument('--use-openai', action='store_true', help='Use OpenAI embeddings (requires API key)')
+    query_parser.add_argument('--path-filter', help='Filter results by file path')
     
     args = parser.parse_args()
     
+    if not args.command:
+        parser.print_help()
+        return
+    
     indexer = MarkdownIndexer(
         persist_dir=args.db_path,
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
+        chunk_size=getattr(args, 'chunk_size', 500),
+        chunk_overlap=getattr(args, 'chunk_overlap', 50),
         use_openai=args.use_openai
     )
-    indexer.index_directory(args.directory)
+    
+    if args.command == 'index':
+        indexer.index_directory(args.directory)
+    elif args.command == 'query':
+        results = indexer.query_documents(
+            query_text=args.query,
+            n_results=args.n_results
+        )
+        
+        # Print results
+        print(f"\nFound {len(results['documents'][0])} results:")
+        for i, (document, metadata, score) in enumerate(zip(
+            results['documents'][0],
+            results['metadatas'][0],
+            results['distances'][0]
+        )):
+            # Filter by path if specified
+            if args.path_filter and args.path_filter not in metadata['source_path']:
+                continue
+                
+            print(f"\nResult {i+1} (similarity: {1-score:.3f})")
+            print(f"Source: {metadata['source_path']}")
+            print(f"Chunk: {metadata['chunk_index']+1}/{metadata['total_chunks']}")
+            print("Content:", document)
 
 if __name__ == "__main__":
     main()

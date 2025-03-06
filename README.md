@@ -34,7 +34,7 @@ OPENAI_API_KEY=your_api_key_here
 To index your markdown files:
 
 ```bash
-python index_markdown.py /path/to/your/markdown/directory
+python index_markdown.py index /path/to/your/markdown/directory
 ```
 
 Optional arguments:
@@ -48,10 +48,10 @@ Optional arguments:
 Index with custom settings:
 ```bash
 # Using default embeddings
-python index_markdown.py /path/to/markdown --chunk-size 1000 --chunk-overlap 100
+python index_markdown.py index /path/to/markdown --chunk-size 1000 --chunk-overlap 100
 
 # Using OpenAI embeddings (requires API key)
-python index_markdown.py /path/to/markdown --use-openai
+python index_markdown.py index /path/to/markdown --use-openai
 ```
 
 ## Python API Usage
@@ -99,12 +99,126 @@ Documents are processed in batches (100 chunks per batch) to efficiently handle 
 - ChromaDB persistence directory is created if it doesn't exist
 - Unique IDs are generated for each chunk (format: `filename_chunk_N`)
 
-## Query Results
+## Querying the Index
 
-When querying, results include:
-- Chunk content
-- Original document metadata
-- Chunk position information
-- Relevance scores
+### Using Command Line
 
-Results are ordered by semantic similarity to the query.
+The script provides a simple command-line interface for searching:
+
+```bash
+# Basic search
+python index_markdown.py query "your search query"
+
+# Search with more results
+python index_markdown.py query "your search query" --n-results 10
+
+# Search using OpenAI embeddings
+python index_markdown.py query "your search query" --use-openai
+
+# Filter results by file path
+python index_markdown.py query "your search query" --path-filter "docs/"
+
+# Specify different database path
+python index_markdown.py query "your search query" --db-path "custom_db"
+```
+
+### Using Python
+
+You can query the indexed documents in two ways:
+
+1. Using the existing indexer:
+```python
+from index_markdown import MarkdownIndexer
+
+# Initialize with the same settings used for indexing
+indexer = MarkdownIndexer(
+    persist_dir="chroma_db",  # use the same directory as indexing
+    use_openai=True  # set to True if you used OpenAI embeddings for indexing
+)
+
+# Simple query
+results = indexer.query_documents(
+    query_text="your search query here",
+    n_results=5  # number of results to return
+)
+
+# Process results
+for i, (document, metadata, score) in enumerate(zip(
+    results['documents'][0],
+    results['metadatas'][0],
+    results['distances'][0]
+)):
+    print(f"\nResult {i+1} (similarity: {1-score:.3f})")
+    print(f"Source: {metadata['source_path']}")
+    print(f"Chunk: {metadata['chunk_index']+1}/{metadata['total_chunks']}")
+    print("Content:", document)
+```
+
+2. Using ChromaDB directly:
+```python
+import chromadb
+from chromadb.utils import embedding_functions
+
+# Initialize the client
+client = chromadb.PersistentClient(path="chroma_db")
+
+# Get the collection
+collection = client.get_collection(
+    name="markdown_docs",
+    # Use the same embedding function as during indexing
+    embedding_function=embedding_functions.SentenceTransformerEmbeddingFunction()
+    # Or for OpenAI:
+    # embedding_function=embedding_functions.OpenAIEmbeddingFunction(
+    #     api_key="your_key",
+    #     model_name="text-embedding-3-small"
+    # )
+)
+
+# Query with filters
+results = collection.query(
+    query_texts=["your search query"],
+    n_results=5,
+    # Optional: filter by metadata
+    where={"source_path": {"$contains": "specific/path"}},
+    # Optional: include relevance score
+    include=["metadatas", "documents", "distances"]
+)
+```
+
+### Advanced Query Features
+
+1. **Metadata Filtering**: Filter results based on metadata fields:
+```python
+# Filter by specific file path
+results = collection.query(
+    query_texts=["query"],
+    where={"source_path": {"$contains": "docs/"}}
+)
+
+# Filter by chunk index
+results = collection.query(
+    query_texts=["query"],
+    where={"chunk_index": {"$lt": 3}}  # only first 3 chunks
+)
+```
+
+2. **Batch Queries**: Search multiple queries at once:
+```python
+results = collection.query(
+    query_texts=["query1", "query2", "query3"],
+    n_results=3
+)
+```
+
+### Query Results
+
+Results include:
+- **Document Content**: The text chunk that matches your query
+- **Metadata**:
+  * `source_path`: Original markdown file path
+  * `chunk_index`: Position of the chunk in the document
+  * `total_chunks`: Total number of chunks in the document
+  * Any frontmatter metadata from the original markdown
+- **Distance Score**: Lower scores indicate better matches (using cosine similarity)
+
+Results are ordered by semantic similarity to the query, with the most relevant chunks appearing first.
